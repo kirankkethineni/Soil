@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DermaLite: Skin Disease Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f2f6ff;
+      color: #333;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .container {
+      background: #fff;
+      border-radius: 1rem;
+      padding: 2rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    video, canvas, img {
+      width: 100%;
+      max-width: 320px;
+      border-radius: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    button {
+      margin-top: 1rem;
+      padding: 0.75rem 1.5rem;
+      background-color: #3182ce;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    #predictedLabel {
+      margin-top: 1.5rem;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #2f855a;
+    }
+	
+	#capturedImage {
+     display: block;
+     margin: 1rem auto;
+     max-width: 320px;
+     border-radius: 0.5rem;
+   }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📸 DermaLite - Skin Disease Predictor</h1>
+    <p>Point your camera to a skin patch and tap "Capture"</p>
+    
+    <video id="video" autoplay playsinline></video>
+    <button id="captureBtn">📷 Capture & Predict</button>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <img id="capturedImage" style="display:none;" />
+    <p id="predictedLabel">Prediction: <span id="labelResult">None</span></p>
+  </div>
+
+  <script>
+    const labels = [
+      "Acne", "Eczema", "Psoriasis", "Rosacea", 
+      "Melanoma", "Basal Cell Carcinoma", "Benign Mole"
+    ];
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const capturedImage = document.getElementById("capturedImage");
+    const captureBtn = document.getElementById("captureBtn");
+    const labelResult = document.getElementById("labelResult");
+
+    let model;
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+    }
+
+    async function preprocessImage(imageElement) {
+      return tf.browser.fromPixels(imageElement)
+        .resizeNearestNeighbor([96, 96])
+        .toFloat()
+        .div(255.0)
+        .expandDims();
+    }
+
+    async function predictFromImageElement(imageElement) {
+      const inputTensor = await preprocessImage(imageElement);
+      const prediction = model.predict(inputTensor);
+      const predictionArray = await prediction.array();
+      const predictedIndex = predictionArray[0].indexOf(Math.max(...predictionArray[0]));
+      const predictedLabel = labels[predictedIndex] || "Unknown";
+      labelResult.textContent = predictedLabel;
+
+      inputTensor.dispose();
+      prediction.dispose();
+    }
+
+    async function init() {
+      try {
+        model = await tf.loadGraphModel("static/model.json");
+        console.log("✅ Model loaded");
+        await setupCamera();
+      } catch (err) {
+        console.error("❌ Failed to load model or camera:", err);
+        labelResult.textContent = "Error initializing app.";
+      }
+    }
+
+    captureBtn.addEventListener("click", async () => {
+      const context = canvas.getContext("2d");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      capturedImage.src = canvas.toDataURL("image/png");
+      capturedImage.style.display = "block";
+
+      await predictFromImageElement(capturedImage);
+    });
+
+    init();
+  </script>
+</body>
+</html>

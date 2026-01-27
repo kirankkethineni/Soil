@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DermaLite: Skin Disease Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f2f6ff;
+      color: #333;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .container {
+      background: #fff;
+      border-radius: 1rem;
+      padding: 2rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    video, canvas, img {
+      width: 100%;
+      max-width: 320px;
+      border-radius: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    button {
+      margin-top: 1rem;
+      padding: 0.75rem 1.5rem;
+      background-color: #3182ce;
+      color: white;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    #predictedLabel {
+      margin-top: 1.5rem;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #2f855a;
+    }
+	
+	#capturedImage {
+     display: block;
+     margin: 1rem auto;
+     max-width: 320px;
+     border-radius: 0.5rem;
+   }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📸 DermaLite - Skin Disease Predictor</h1>
+    <p>Point your camera to a skin patch and tap "Capture"</p>
+    
+    <video id="video" autoplay playsinline></video>
+    <button id="captureBtn">📷 Capture & Predict</button>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <img id="capturedImage" style="display:none;" />
+    <p id="predictedLabel">Prediction: <span id="labelResult">None</span></p>
+  </div>
+
+  <script>
+    const labels = [
+      "Black Rot", "Esca", "Healthy", "Blight"
+    ];
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const capturedImage = document.getElementById("capturedImage");
+    const captureBtn = document.getElementById("captureBtn");
+    const labelResult = document.getElementById("labelResult");
+
+    let model;
+    let full_model;
+	let shared_model;
+	let classifier_model;
+	
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+    }
+
+    async function preprocessImage(imageElement) {
+      return tf.browser.fromPixels(imageElement)
+        .resizeNearestNeighbor([96, 96])
+        .toFloat()
+        .div(255.0)
+        .expandDims();
+    }
+
+    async function predictFromImageElement(imageElement, mode = 'serial') {
+	  console.log('Image element size:', imageElement.width, imageElement.height);
+	  const inputTensor = await preprocessImage(imageElement); // shape: [1, 96, 96, 3]
+      console.log('Input tensor shape:', inputTensor.shape);
+	  let prediction;
+      const t0 = performance.now();
+	  
+	  if (mode === 'full') {
+		console.log('Use the end-to-end full_model');
+		prediction = full_model.predict(inputTensor);
+	  } else {
+		console.log('Use shared_model + classifier_model');
+		const [r, g, b] = tf.split(inputTensor, 3, 3); // Split channels: shape [1, 96, 96, 1]
+
+		let features;
+
+		if (mode === 'parallel') {
+		  console.log('Run shared model in parallel using Promise.all');
+		  const [outR, outG, outB] = await Promise.all([
+			shared_model.execute(r),
+			shared_model.execute(g),
+			shared_model.execute(b)
+		  ]);
+		  features = tf.concat([outR, outG, outB], -1); // shape: [1, 6, 6, 48]
+		  outR.dispose(); outG.dispose(); outB.dispose();
+		} else {
+		  console.log('Run shared model in series');
+		  const outR = await shared_model.execute(r);
+		  const outG = await shared_model.execute(g);
+		  const outB = await shared_model.execute(b);
+		  features = tf.concat([outR, outG, outB], -1);
+		  outR.dispose(); outG.dispose(); outB.dispose();
+		}
+
+		// Pass to classifier
+		prediction = classifier_model.predict(features);
+		features.dispose();
+	  }
+      await prediction.data();
+	  const t1 = performance.now();
+	  console.log(`Inference time (${mode}): ${(t1 - t0).toFixed(2)} ms`);
+	  const predictionArray = await prediction.array();
+	  const predictedIndex = predictionArray[0].indexOf(Math.max(...predictionArray[0]));
+	  const predictedLabel = labels[predictedIndex] || "Unknown";
+      console.log(predictedLabel);
+	  labelResult.textContent = predictedLabel;
+
+	  inputTensor.dispose();
+	  prediction.dispose();
+	}
+
+
+    async function init() {
+      try {
+        full_model = await tf.loadGraphModel("static/full_model/model.json");
+        console.log("✅ full_model loaded");
+		classifier_model = await tf.loadGraphModel("static/classifier_model/model.json");
+        console.log("✅ classifier_model loaded");
+		shared_model = await tf.loadGraphModel("static/shared_model/model.json");
+        console.log("✅ shared_model loaded");
+		console.log("TensorFlow.js backend:", tf.getBackend());
+
+        await setupCamera();
+      } catch (err) {
+        console.error("❌ Failed to load model or camera:", err);
+        labelResult.textContent = "Error initializing app.";
+      }
+    }
+
+    captureBtn.addEventListener("click", async () => {
+      const context = canvas.getContext("2d");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      capturedImage.src = canvas.toDataURL("image/png");
+      capturedImage.style.display = "block";
+
+      capturedImage.onload = async () => {
+		await predictFromImageElement(capturedImage);
+	  };
+    });
+
+    init();
+  </script>
+</body>
+</html>
