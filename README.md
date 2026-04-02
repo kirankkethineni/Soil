@@ -7,7 +7,7 @@
 > **Kiran K. Kethineni · Saraju P. Mohanty · Elias Kougianos**
 > Department of Computer Science and Engineering, University of North Texas, USA
 
-**[Project Page](https://kirankkethineni.github.io/Soil/) | [Paper (OCIT 2025)](#citation) | [Jump to Code](#code-guide)**
+**[Project Page](https://kirankkethineni.github.io/Soil/) | [Paper (OCIT 2025)](https://ieeexplore.ieee.org/abstract/document/11400270) | [Jump to Code](#code-guide)**
 
 ---
 
